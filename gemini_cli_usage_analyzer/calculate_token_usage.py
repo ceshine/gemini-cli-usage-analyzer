@@ -1,8 +1,9 @@
 import os
-import json
+import re
 from pathlib import Path
 from collections import defaultdict
 
+import orjson
 import typer
 
 
@@ -16,26 +17,36 @@ def parse_json_stream(file_path: Path):
         with open(file_path, "r", encoding="latin-1") as f:
             content = f.read()
 
-    decoder = json.JSONDecoder()
-    idx = 0
-    length = len(content)
+    # Split using regex to find boundaries between objects: } followed by whitespace and {
+    # We use lookbehind (?<=}) and lookahead (?=&#123;) to keep the braces in the chunks.
+    # We also capture the whitespace (\s*) to preserve it if we need to merge chunks
+    # (e.g. if the split occurred inside a string).
+    parts = re.split(r'(?<=})(\s*)(?={)', content)
 
-    while idx < length:
-        # Skip whitespace
-        while idx < length and content[idx].isspace():
-            idx += 1
+    buffer = ""
+    for part in parts:
+        buffer += part
 
-        if idx >= length:
-            break
+        # Skip if buffer contains only whitespace
+        if not buffer.strip():
+            # If we cleared the buffer after a success, and part is just whitespace, keep it cleared.
+            # If we are accumulating (buffer has content), adding whitespace doesn't make it parseable usually,
+            # unless it was just trailing space.
+            # But here, if buffer is just whitespace, it's definitely not a valid object start.
+            # However, if we are accumulating a partial object, buffer won't be just whitespace.
+            if not buffer.strip():
+                buffer = "" 
+            continue
 
         try:
-            obj, end_idx = decoder.raw_decode(content, idx=idx)
+            # Attempt to parse the current buffer
+            obj = orjson.loads(buffer)
             yield obj
-            idx = end_idx
-        except json.JSONDecodeError:
-            # If we hit an error (e.g., incomplete JSON at the end due to crash/truncation)
-            # we just stop parsing.
-            break
+            # If successful, clear buffer for the next object
+            buffer = ""
+        except orjson.JSONDecodeError:
+            # If parsing fails (e.g., split inside a string), continue accumulating
+            continue
 
 
 def main(log_file_path: Path):
