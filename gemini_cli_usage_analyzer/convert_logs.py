@@ -8,14 +8,14 @@ import orjson
 
 def main(
     input_file: Path = typer.Argument(
-        ...,
+        Path(".gemini/telemetry.log"),
         help="Path to the input log file containing concatenated JSON objects.",
         exists=True,
         dir_okay=False,
         readable=True,
     ),
     output_file: Path = typer.Option(
-        "telemetry.jsonl",
+        Path(".gemini/telemetry.jsonl"),
         "--output",
         "-o",
         help="Path to the output JSONL file.",
