@@ -19,7 +19,10 @@ def parse_json_stream(file_path: Path):
                 yield obj
             except orjson.JSONDecodeError as e:
                 # Log the error but continue processing other lines
-                print(f"Warning: Could not parse JSON on line {line_num}: {stripped_line[:100]}... Error: {e}", file=os.sys.stderr)
+                print(
+                    f"Warning: Could not parse JSON on line {line_num}: {stripped_line[:100]}... Error: {e}",
+                    file=os.sys.stderr,
+                )
                 continue
 
 

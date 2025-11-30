@@ -21,6 +21,11 @@ def main(
         help="Path to the output JSONL file.",
         writable=True,
     ),
+    simplify: bool = typer.Option(
+        False,
+        "--simplify",
+        help="Only keep objects whose 'attributes' field's 'event.name' value is 'gemini_cli.api_response' or 'gemini_cli.api_request'.",
+    ),
 ):
     """Convert a log file with concatenated JSON objects to JSONL format.
 
@@ -47,9 +52,17 @@ def main(
                         # Attempt to parse the accumulated buffer
                         obj = orjson.loads(buffer)
 
+                        should_write = True
+                        if simplify:
+                            attributes = obj.get("attributes", {})
+                            event_name = attributes.get("event.name")
+                            if event_name not in ("gemini_cli.api_response", "gemini_cli.api_request"):
+                                should_write = False
+
                         # If successful, write to output and reset buffer
-                        _ = f_out.write(orjson.dumps(obj) + b"\n")
-                        count += 1
+                        if should_write:
+                            _ = f_out.write(orjson.dumps(obj) + b"\n")
+                            count += 1
                         buffer = ""
                     except orjson.JSONDecodeError:
                         # Buffer might contain a nested object ending in '}', or incomplete data
