@@ -77,11 +77,11 @@ def main(
         dir_okay=False,
         readable=True,
     ),
-    output_file_path: Path = typer.Option(
-        Path(".gemini/telemetry.jsonl"),
+    output_file_path: Path | None = typer.Option(
+        None,
         "--output",
         "-o",
-        help="Path to the output JSONL file.",
+        help="Path to the output JSONL file. Defaults to the same location of the input file path, but with the suffix changed to .jsonl",
         writable=True,
     ),
     simplify: bool = typer.Option(
@@ -117,6 +117,9 @@ def main(
     """
     count = 0
     skipped_count = 0
+
+    if output_file_path is None:
+        output_file_path = input_file_path.with_suffix(".jsonl")
 
     # Determine the last timestamp to support incremental updates
     last_timestamp = get_last_timestamp(output_file_path)
