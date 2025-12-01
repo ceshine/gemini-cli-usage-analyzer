@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from collections import defaultdict
+from collections.abc import MutableMapping
 
 import orjson
 import typer
@@ -19,21 +20,23 @@ def parse_json_stream(file_path: Path):
                 yield obj
             except orjson.JSONDecodeError as e:
                 # Log the error but continue processing other lines
-                print(
+                typer.echo(
                     f"Warning: Could not parse JSON on line {line_num}: {stripped_line[:100]}... Error: {e}",
-                    file=os.sys.stderr,
+                    err=True,
                 )
                 continue
 
 
 def main(log_file_path: Path):
-    usage_by_model = defaultdict(lambda: {"input": 0, "output": 0, "cached": 0, "thoughts": 0, "count": 0})
+    usage_by_model: MutableMapping[str, dict[str, int]] = defaultdict(
+        lambda: {"input": 0, "output": 0, "cached": 0, "thoughts": 0, "count": 0}
+    )
 
     if not os.path.exists(log_file_path):
-        print(f"Error: {log_file_path} not found.")
+        typer.echo(f"Error: {log_file_path} not found.", err=True)
         return
 
-    print(f"Reading {log_file_path}...")
+    typer.echo(f"Reading {log_file_path}...")
 
     count = 0
     encountered_errors = False
@@ -56,19 +59,19 @@ def main(log_file_path: Path):
                 usage_by_model[model]["count"] += 1
                 count += 1
     except Exception as e:
-        print(f"\nWarning: Error occurred while processing logs: {e}")
-        print("Displaying results processed so far...")
+        typer.echo(f"\nWarning: Error occurred while processing logs: {e}", err=True)
+        typer.echo("Displaying results processed so far...", err=True)
         encountered_errors = True
 
     if count == 0:
-        print("No inference events found in the log.")
+        typer.echo("No inference events found in the log.")
         return
 
-    print(f"\nFound {count} inference events.\n")
-    print(
+    typer.echo(f"\nFound {count} inference events.\n")
+    typer.echo(
         f"{'Model':<30} | {'Requests':<10} | {'Input Tokens':<15} | {'Output Tokens':<15} | {'Cached Tokens':<15} | {'Thoughts Tokens':<15} | {'Total':<15}"
     )
-    print("-" * 135)
+    typer.echo("-" * 135)
 
     total_req = 0
     total_input = 0
@@ -80,7 +83,7 @@ def main(log_file_path: Path):
         total = (
             usage["input"] + usage["output"] + usage["thoughts"]
         )  # Cached tokens are part of input, so not added here directly for total
-        print(
+        typer.echo(
             f"{model:<30} | {usage['count']:<10} | {usage['input']:<15,} | {usage['output']:<15,} | {usage['cached']:<15,} | {usage['thoughts']:<15,} | {total:<15,}"
         )
         total_req += usage["count"]
@@ -89,8 +92,8 @@ def main(log_file_path: Path):
         total_cached += usage["cached"]
         total_thoughts += usage["thoughts"]
 
-    print("-" * 135)
-    print(
+    typer.echo("-" * 135)
+    typer.echo(
         f"{'Grand Total':<30} | {total_req:<10} | {total_input:<15,} | {total_output:<15,} | {total_cached:<15,} | {total_thoughts:<15,} | {total_input + total_output + total_thoughts:<15,}"
     )
 
