@@ -5,23 +5,27 @@ from collections.abc import MutableMapping
 
 import orjsonl
 import typer
+from rich.console import Console
+from rich.table import Table
 
 
 def main(log_file_path: Path):
+    console = Console()
     usage_by_model: MutableMapping[str, dict[str, int]] = defaultdict(
         lambda: {"input": 0, "output": 0, "cached": 0, "thoughts": 0, "count": 0}
     )
 
     if not os.path.exists(log_file_path):
-        typer.echo(f"Error: {log_file_path} not found.", err=True)
+        console.print(f"Error: {log_file_path} not found.", style="bold red")
         return
 
-    typer.echo(f"Reading {log_file_path}...")
+    console.print(f"Reading {log_file_path}...")
 
     count = 0
     encountered_errors = False
     try:
         for entry in orjsonl.stream(log_file_path):
+            assert isinstance(entry, dict), f"Got an unexpected entry that is not a dict {entry}"
             attributes = entry.get("attributes", {})
             event_name = attributes.get("event.name")
 
@@ -39,19 +43,29 @@ def main(log_file_path: Path):
                 usage_by_model[model]["count"] += 1
                 count += 1
     except Exception as e:
-        typer.echo(f"\nWarning: Error occurred while processing logs: {e}", err=True)
-        typer.echo("Displaying results processed so far...", err=True)
+        console.print(f"\nWarning: Error occurred while processing logs: {e}", style="bold yellow")
+        console.print("Displaying results processed so far...", style="bold yellow")
         encountered_errors = True
 
     if count == 0:
-        typer.echo("No inference events found in the log.")
+        console.print("No inference events found in the log.")
         return
 
-    typer.echo(f"\nFound {count} inference events.\n")
-    typer.echo(
-        f"{'Model':<30} | {'Requests':<10} | {'Input Tokens':<15} | {'Output Tokens':<15} | {'Cached Tokens':<15} | {'Thoughts Tokens':<15} | {'Total':<15}"
+    console.print(f"\nFound {count} inference events.\n")
+    table = Table(
+        title="Token Usage by Model",
+        show_footer=True,
+        footer_style="bold",
+        title_justify="left",
     )
-    typer.echo("-" * 135)
+
+    table.add_column("Model", footer="Grand Total", justify="left")
+    table.add_column("Requests", footer_style="bold", justify="right")
+    table.add_column("Input Tokens", footer_style="bold", justify="right")
+    table.add_column("Output Tokens", footer_style="bold", justify="right")
+    table.add_column("Cached Tokens", footer_style="bold", justify="right")
+    table.add_column("Thoughts Tokens", footer_style="bold", justify="right")
+    table.add_column("Total", footer_style="bold", justify="right")
 
     total_req = 0
     total_input = 0
@@ -63,8 +77,14 @@ def main(log_file_path: Path):
         total = (
             usage["input"] + usage["output"] + usage["thoughts"]
         )  # Cached tokens are part of input, so not added here directly for total
-        typer.echo(
-            f"{model:<30} | {usage['count']:<10} | {usage['input']:<15,} | {usage['output']:<15,} | {usage['cached']:<15,} | {usage['thoughts']:<15,} | {total:<15,}"
+        table.add_row(
+            model,
+            str(usage["count"]),
+            f"{usage['input']:,}",
+            f"{usage['output']:,}",
+            f"{usage['cached']:,}",
+            f"{usage['thoughts']:,}",
+            f"{total:,}",
         )
         total_req += usage["count"]
         total_input += usage["input"]
@@ -72,10 +92,13 @@ def main(log_file_path: Path):
         total_cached += usage["cached"]
         total_thoughts += usage["thoughts"]
 
-    typer.echo("-" * 135)
-    typer.echo(
-        f"{'Grand Total':<30} | {total_req:<10} | {total_input:<15,} | {total_output:<15,} | {total_cached:<15,} | {total_thoughts:<15,} | {total_input + total_output + total_thoughts:<15,}"
-    )
+    table.columns[1].footer = str(total_req)
+    table.columns[2].footer = f"{total_input:,}"
+    table.columns[3].footer = f"{total_output:,}"
+    table.columns[4].footer = f"{total_cached:,}"
+    table.columns[5].footer = f"{total_thoughts:,}"
+    table.columns[6].footer = f"{total_input + total_output + total_thoughts:,}"
+    console.print(table)
 
     if encountered_errors:
         # Return a non-zero exit code
