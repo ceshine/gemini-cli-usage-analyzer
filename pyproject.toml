@@ -5,6 +5,7 @@ description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
     "orjson>=3.11.4",
+    "orjsonl>=1.0.0",
     "typer>=0.20.0",
 ]
 

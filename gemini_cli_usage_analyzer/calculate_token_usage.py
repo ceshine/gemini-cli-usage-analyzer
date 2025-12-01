@@ -3,28 +3,8 @@ from pathlib import Path
 from collections import defaultdict
 from collections.abc import MutableMapping
 
-import orjson
+import orjsonl
 import typer
-
-
-def parse_json_stream(file_path: Path):
-    """Parses a file where each line is a JSON object (JSONL format)."""
-    with open(file_path, "r", encoding="utf-8") as f:
-        for line_num, line in enumerate(f, 1):
-            stripped_line = line.strip()
-            if not stripped_line:
-                continue  # Skip empty lines
-
-            try:
-                obj = orjson.loads(stripped_line)
-                yield obj
-            except orjson.JSONDecodeError as e:
-                # Log the error but continue processing other lines
-                typer.echo(
-                    f"Warning: Could not parse JSON on line {line_num}: {stripped_line[:100]}... Error: {e}",
-                    err=True,
-                )
-                continue
 
 
 def main(log_file_path: Path):
@@ -41,7 +21,7 @@ def main(log_file_path: Path):
     count = 0
     encountered_errors = False
     try:
-        for entry in parse_json_stream(log_file_path):
+        for entry in orjsonl.stream(log_file_path):
             attributes = entry.get("attributes", {})
             event_name = attributes.get("event.name")
 
