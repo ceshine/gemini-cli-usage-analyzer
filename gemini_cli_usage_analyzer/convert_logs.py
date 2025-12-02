@@ -96,8 +96,8 @@ def main(
         "--simplify-level",
         help="Simplification level. 0: None, 1: Events Only. Defaults to 0.",
     ),
-    archiving_disabled: bool = typer.Option(
-        False, "--disable-archiving", help="Disable archiving of the input log file."
+    archiving_enabled: bool = typer.Option(
+        False, "--enable-archiving", help="Enable archiving of the input log file."
     ),
     archive_folder_path: Path = typer.Option(
         "/tmp",
@@ -184,7 +184,7 @@ def main(
 
         typer.echo(f"Successfully converted {count} records to {output_file_path} (Skipped {skipped_count})")
 
-        if not archiving_disabled:
+        if archiving_enabled:
             archive_folder_path.mkdir(exist_ok=True, parents=True)
             new_file_name = f"{input_file_path.stem}.{int(datetime.now().timestamp())}{input_file_path.suffix}"
             new_file_path = archive_folder_path / new_file_name
