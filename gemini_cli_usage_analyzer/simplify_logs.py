@@ -43,6 +43,7 @@ def simplify_record(record: dict[str, Any], level: int) -> dict[str, Any] | None
         if event_name != "gemini_cli.api_response":
             return None
         record["attributes"] = {
+            "event.timestamp": attributes["event.timestamp"],
             "duration_ms": attributes["duration_ms"],
             "input_token_count": attributes["input_token_count"],
             "output_token_count": attributes["output_token_count"],
@@ -52,6 +53,8 @@ def simplify_record(record: dict[str, Any], level: int) -> dict[str, Any] | None
             "tool_token_count": attributes["tool_token_count"],
             "model": attributes["model"],
             "session.id": attributes["session.id"],
+            # The event name is always "gemini_cli.api_response" for now
+            "event.name": attributes["event.name"],
         }
 
     # Level 1: Filter for specific events

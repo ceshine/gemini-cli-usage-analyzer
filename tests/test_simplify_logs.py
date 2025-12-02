@@ -48,6 +48,7 @@ def test_simplify_record_level_2():
 def test_simplify_record_level_3_happy_path():
     attributes = {
         "event.name": "gemini_cli.api_response",
+        "event.timestamp": "2023-10-26T12:00:00Z",
         "duration_ms": 100,
         "input_token_count": 10,
         "output_token_count": 20,
@@ -67,6 +68,8 @@ def test_simplify_record_level_3_happy_path():
     result = simplify_record(record, 3)
 
     expected_attributes = {
+        "event.name": "gemini_cli.api_response",
+        "event.timestamp": "2023-10-26T12:00:00Z",
         "duration_ms": 100,
         "input_token_count": 10,
         "output_token_count": 20,
