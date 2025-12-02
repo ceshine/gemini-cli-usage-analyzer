@@ -13,6 +13,8 @@ from rich.table import Table
 from .price_spec import get_price_spec
 from .convert_logs import main as convert_log_file
 
+LOGGER = logging.getLogger(__name__)
+
 
 def calculate_cost(attributes: dict[str, Any], price_spec: dict[str, Any]) -> float:
     """Calculates the cost of an inference event based on token usage and price specification.
@@ -100,48 +102,57 @@ def process_log_file(
                 usage_by_model[model]["cost"] += cost
                 count += 1
     except Exception as e:
-        # We print the error here as in original code, or we could return it.
-        # The original code printed it. To separate concerns properly, maybe we should
-        # just return the fact that an error occurred, and maybe the exception itself?
-        # For now, to keep it simple and compatible with main's expectation:
-        print(f"\nWarning: Error occurred while processing logs: {e}")
+        LOGGER.error("Error processing the JSONL data: %s", e)
         encountered_errors = True
 
     return usage_by_model, count, encountered_errors
 
 
-def main(log_file_path: Path, disable_archiving: bool = False):
+def main(log_file_path: Path, enable_archiving: bool = False, log_simplify_level: int = 1):
     """Calculates and displays token usage and cost from a Gemini CLI log file.
 
     Args:
         log_file_path (Path): Path to the JSONL log file to analyze.
-          - If a folder is provided, the default `telemetry.log` file will be converted into `telemetry.jsonl`, and the `telemetry.log` will be moved to `/tmp` folder automatically.
+          - If a folder is provided, it attempts to find `telemetry.log` (or `.gemini/telemetry.log`) to convert.
+          - It also checks for `telemetry.jsonl` (or `gemini/telemetry.jsonl`) to use directly if no log file is found.
           - If a .jsonl file is provided, it will be processed directly.
-        disable_archiving (bool): Disable archiving (moving to `/tmp`) when a folder is provided as `log_file_path`.
+        enable_archiving (bool): Enable archiving (moving to `/tmp`) when a folder is provided as `log_file_path`. Only enable it if no Gemini CLI is currently running.
+        log_simplify_level (int): Level of simplification for the JSONL log file. Available levels: 0 (no simplification), 1 (default), 2 (trim fields), and 3 (trim attributes)
     """
     console = Console()
 
     if log_file_path.is_dir():
+        source_log_file, jsonl_file = None, None
         # Try to find the the default file in the specified folder
         if (log_file_path / "telemetry.log").exists():
             source_log_file = log_file_path / "telemetry.log"
         elif (log_file_path / ".gemini" / "telemetry.log").exists():
             source_log_file = log_file_path / ".gemini" / "telemetry.log"
+        elif (log_file_path / "telemetry.jsonl").exists():
+            jsonl_file = log_file_path / "telemetry.jsonl"
+        elif (log_file_path / ".gemini" / "telemetry.jsonl").exists():
+            jsonl_file = log_file_path / ".gemini" / "telemetry.jsonl"
         else:
             raise typer.BadParameter(
-                f"Could not find telemetry.log in {log_file_path} nor in {log_file_path / '.gemini'}"
+                f"Could not find telemetry.log or telemetry.jsonl in {log_file_path} nor in its '.gemini' or 'gemini' subdirectories."
             )
-        log_file_path = convert_log_file(
-            source_log_file,
-            source_log_file.parent / "telemetry.jsonl",
-            simplify_level=1,
-            archiving_enabled=not disable_archiving,
-            archive_folder_path=Path("/tmp"),
-        )
-        console.print(
-            f"Converted {source_log_file} to {log_file_path} with archiving [bold]{'ENABLED' if not disable_archiving else 'DISABLED'}[/bold]",
-            style="green",
-        )
+        if source_log_file is not None and jsonl_file is None:
+            log_file_path = convert_log_file(
+                source_log_file,
+                source_log_file.parent / "telemetry.jsonl",
+                simplify_level=log_simplify_level,
+                archiving_enabled=enable_archiving,
+                archive_folder_path=Path("/tmp"),
+            )
+            console.print(
+                f"Converted {source_log_file} to {log_file_path} with archiving [bold]{'ENABLED' if enable_archiving else 'DISABLED'}[/bold]",
+                style="green",
+            )
+        elif jsonl_file is not None:
+            console.print(f"Using [bold]{jsonl_file}[/bold] as the JSONL log file", style="green")
+            log_file_path = jsonl_file
+        else:
+            raise RuntimeError("Incorrect combination of the `source_log_file` and the `jsonl_file` values.")
     elif log_file_path.suffix != ".jsonl":
         raise typer.BadParameter(f"Log file must be a .jsonl file, got {log_file_path}")
 
