@@ -17,6 +17,8 @@ from .convert_logs import main as convert_log_file
 
 LOGGER = logging.getLogger(__name__)
 
+TABLE_ROW_STYLES = ["white", "yellow"]
+
 
 @dataclass
 class UsageStats:
@@ -184,19 +186,30 @@ def print_usage_table(
 
     total_stats = UsageStats()
 
+    # Logic for alternating row styles based on date
+    last_date_str = None
+    style_index = 0
+    # Alternating styles for different days
+    styles = TABLE_ROW_STYLES
+
     for key, stats in data:
         total_stats += stats
         total_tokens = (
+            # Pecularity of Gemini CLI's logs: `input_tokens` includes `cached_tokens`, but `output_tokens` does not include `thoughts_tokens`
             stats.input_tokens + stats.output_tokens + stats.thoughts_tokens
-        )  # cached included in input visually usually? logic says input includes cached in some contexts but here separate fields.
-        # In calculate_cost: input_tokens - cached_tokens.
-        # Here we just list the raw counters.
-        # Total tokens usually means input + output + thoughts.
-
+        )
         row_args = []
+        row_style = None
+
         if show_date:
             # Unpack key assuming it is (date_str, model)
             date_str, model_name = key
+
+            if last_date_str is not None and date_str != last_date_str:
+                style_index = (style_index + 1) % len(styles)
+            last_date_str = date_str
+            row_style = styles[style_index]
+
             row_args.append(date_str)
             row_args.append(model_name)
         else:
@@ -214,7 +227,7 @@ def print_usage_table(
                 f"{total_tokens:,}",
             ]
         )
-        table.add_row(*row_args)
+        table.add_row(*row_args, style=row_style)
 
     # Set footers
     # Adjust column indices based on show_date
@@ -324,6 +337,32 @@ def main(
     daily_data = [((key[1].isoformat(), key[0]), usage_by_model_day[key]) for key in sorted_keys]
     print_usage_table("Daily Token Usage", daily_data, console, show_date=True)
 
+    console.print("\n")
+
+    # Prepare Aggregated Daily Costs
+    daily_costs: dict[date, float] = defaultdict(float)
+    for (_, day), stats in usage_by_model_day.items():
+        daily_costs[day] += stats.cost
+
+    cost_table = Table(title="Daily Aggregated Costs", show_footer=True, title_justify="left")
+    cost_table.add_column("Date", justify="left")
+    cost_table.add_column("Cost ($)", justify="right", footer_style="bold")
+
+    total_daily_cost = 0.0
+
+    # Alternating styles for different days
+    styles = TABLE_ROW_STYLES
+    style_index = 0
+
+    for day in sorted(daily_costs.keys()):
+        cost = daily_costs[day]
+        total_daily_cost += cost
+        row_style = styles[style_index % len(styles)]
+        cost_table.add_row(day.isoformat(), f"{cost:,.6f}", style=row_style)
+        style_index += 1  # Increment style_index for the next date
+
+    cost_table.columns[1].footer = f"{total_daily_cost:,.6f}"
+    console.print(cost_table)
     console.print("\n")
 
     # Prepare Overall Stats
