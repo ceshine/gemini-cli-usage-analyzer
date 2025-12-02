@@ -2,8 +2,10 @@ import os
 import logging
 from pathlib import Path
 from collections import defaultdict
-from collections.abc import MutableMapping
 from typing import Any
+from dataclasses import dataclass
+from datetime import datetime, date
+from zoneinfo import ZoneInfo
 
 import orjsonl
 import typer
@@ -14,6 +16,37 @@ from .price_spec import get_price_spec
 from .convert_logs import main as convert_log_file
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class UsageStats:
+    """Accumulates token usage and cost statistics."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    thoughts_tokens: int = 0
+    count: int = 0
+    cost: float = 0.0
+
+    def __add__(self, other: "UsageStats") -> "UsageStats":
+        return UsageStats(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            cached_tokens=self.cached_tokens + other.cached_tokens,
+            thoughts_tokens=self.thoughts_tokens + other.thoughts_tokens,
+            count=self.count + other.count,
+            cost=self.cost + other.cost,
+        )
+
+    def __iadd__(self, other: "UsageStats") -> "UsageStats":
+        self.input_tokens += other.input_tokens
+        self.output_tokens += other.output_tokens
+        self.cached_tokens += other.cached_tokens
+        self.thoughts_tokens += other.thoughts_tokens
+        self.count += other.count
+        self.cost += other.cost
+        return self
 
 
 def calculate_cost(attributes: dict[str, Any], price_spec: dict[str, Any]) -> float:
@@ -59,23 +92,25 @@ def calculate_cost(attributes: dict[str, Any], price_spec: dict[str, Any]) -> fl
 
 
 def process_log_file(
-    log_file_path: Path, price_spec: dict[str, Any]
-) -> tuple[MutableMapping[str, dict[str, int | float]], int, bool]:
-    """Processes a log file to aggregate token usage and cost by model.
+    log_file_path: Path,
+    price_spec: dict[str, Any],
+    timezone: ZoneInfo | None = None,
+) -> tuple[dict[tuple[str, date], UsageStats], int, bool]:
+    """Processes a log file to aggregate token usage and cost by model and date.
 
     Args:
         log_file_path (Path): The path to the log file.
         price_spec (dict[str, Any]): The price specification dictionary.
+        timezone (ZoneInfo | None): The timezone to use for determining the date.
+            If None, the local system timezone is used.
 
     Returns:
         A tuple containing:
-            - A dictionary (MutableMapping[str, dict[str, int | float]]) mapping model names to usage statistics (input, output, cached, thoughts, count, cost).
+            - A dictionary mapping (model, date) tuples to UsageStats objects.
             - The total count (int) of processed inference events.
             - A boolean (bool) indicating if any errors were encountered during processing.
     """
-    usage_by_model: MutableMapping[str, dict[str, int | float]] = defaultdict(
-        lambda: {"input": 0, "output": 0, "cached": 0, "thoughts": 0, "count": 0, "cost": 0.0}
-    )
+    usage_by_model_day: dict[tuple[str, date], UsageStats] = defaultdict(UsageStats)
     count = 0
     encountered_errors = False
 
@@ -91,24 +126,124 @@ def process_log_file(
                 output_tokens = int(attributes.get("output_token_count") or 0)
                 cached_tokens = int(attributes.get("cached_content_token_count") or 0)
                 thoughts_tokens = int(attributes.get("thoughts_token_count") or 0)
+                timestamp_str = attributes.get("event.timestamp")
+
+                # Determine date
+                event_date = date.min  # Default if timestamp is missing
+                if timestamp_str:
+                    try:
+                        dt = datetime.fromisoformat(timestamp_str)
+                        # If timezone is provided, convert to it.
+                        # If timezone is None, astimezone(None) converts to local time.
+                        dt = dt.astimezone(timezone)
+                        event_date = dt.date()
+                    except ValueError:
+                        LOGGER.warning("Invalid timestamp format: %s", timestamp_str)
 
                 cost = calculate_cost(attributes, price_spec)
 
-                usage_by_model[model]["input"] += input_tokens
-                usage_by_model[model]["output"] += output_tokens
-                usage_by_model[model]["cached"] += cached_tokens
-                usage_by_model[model]["thoughts"] += thoughts_tokens
-                usage_by_model[model]["count"] += 1
-                usage_by_model[model]["cost"] += cost
+                stats = usage_by_model_day[(model, event_date)]
+                stats.input_tokens += input_tokens
+                stats.output_tokens += output_tokens
+                stats.cached_tokens += cached_tokens
+                stats.thoughts_tokens += thoughts_tokens
+                stats.count += 1
+                stats.cost += cost
                 count += 1
     except Exception as e:
         LOGGER.error("Error processing the JSONL data: %s", e)
         encountered_errors = True
 
-    return usage_by_model, count, encountered_errors
+    return usage_by_model_day, count, encountered_errors
 
 
-def main(log_file_path: Path, enable_archiving: bool = False, log_simplify_level: int = 1):
+def print_usage_table(
+    title: str,
+    data: list[tuple[Any, UsageStats]],
+    console: Console,
+    show_date: bool = False,
+):
+    """Helper to print usage statistics table."""
+    table = Table(
+        title=title,
+        show_footer=True,
+        footer_style="bold",
+        title_justify="left",
+    )
+
+    if show_date:
+        table.add_column("Date", justify="left")
+    table.add_column("Model", footer="Grand Total", justify="left")
+    table.add_column("Requests", footer_style="bold", justify="right")
+    table.add_column("Input Tokens", footer_style="bold", justify="right")
+    table.add_column("Output Tokens", footer_style="bold", justify="right")
+    table.add_column("Cached Tokens", footer_style="bold", justify="right")
+    table.add_column("Thoughts Tokens", footer_style="bold", justify="right")
+    table.add_column("Cost ($)", footer_style="bold", justify="right")
+    table.add_column("Total Tokens", footer_style="bold", justify="right")
+
+    total_stats = UsageStats()
+
+    for key, stats in data:
+        total_stats += stats
+        total_tokens = (
+            stats.input_tokens + stats.output_tokens + stats.thoughts_tokens
+        )  # cached included in input visually usually? logic says input includes cached in some contexts but here separate fields.
+        # In calculate_cost: input_tokens - cached_tokens.
+        # Here we just list the raw counters.
+        # Total tokens usually means input + output + thoughts.
+
+        row_args = []
+        if show_date:
+            # Unpack key assuming it is (date_str, model)
+            date_str, model_name = key
+            row_args.append(date_str)
+            row_args.append(model_name)
+        else:
+            # key is model
+            row_args.append(key)
+
+        row_args.extend(
+            [
+                str(stats.count),
+                f"{stats.input_tokens:,}",
+                f"{stats.output_tokens:,}",
+                f"{stats.cached_tokens:,}",
+                f"{stats.thoughts_tokens:,}",
+                f"{stats.cost:,.6f}",
+                f"{total_tokens:,}",
+            ]
+        )
+        table.add_row(*row_args)
+
+    # Set footers
+    # Adjust column indices based on show_date
+    col_offset = 1 if show_date else 0
+
+    table.columns[1 + col_offset].footer = str(total_stats.count)
+    table.columns[2 + col_offset].footer = f"{total_stats.input_tokens:,}"
+    table.columns[3 + col_offset].footer = f"{total_stats.output_tokens:,}"
+    table.columns[4 + col_offset].footer = f"{total_stats.cached_tokens:,}"
+    table.columns[5 + col_offset].footer = f"{total_stats.thoughts_tokens:,}"
+    table.columns[6 + col_offset].footer = f"{total_stats.cost:,.6f}"
+    table.columns[
+        7 + col_offset
+    ].footer = f"{(total_stats.input_tokens + total_stats.output_tokens + total_stats.thoughts_tokens):,}"
+
+    console.print(table)
+
+
+def main(
+    log_file_path: Path,
+    enable_archiving: bool = False,
+    log_simplify_level: int = 1,
+    timezone: str = typer.Option(
+        None,
+        "--timezone",
+        "-tz",
+        help="Timezone to use for daily stats (e.g., 'UTC', 'America/New_York'). Defaults to local system time.",
+    ),
+):
     """Calculates and displays token usage and cost from a Gemini CLI log file.
 
     Args:
@@ -118,6 +253,7 @@ def main(log_file_path: Path, enable_archiving: bool = False, log_simplify_level
           - If a .jsonl file is provided, it will be processed directly.
         enable_archiving (bool): Enable archiving (moving to `/tmp`) when a folder is provided as `log_file_path`. Only enable it if no Gemini CLI is currently running.
         log_simplify_level (int): Level of simplification for the JSONL log file. Available levels: 0 (no simplification), 1 (default), 2 (trim fields), and 3 (trim attributes)
+        timezone (str): Timezone string for daily aggregation.
     """
     console = Console()
 
@@ -160,10 +296,18 @@ def main(log_file_path: Path, enable_archiving: bool = False, log_simplify_level
         console.print(f"Error: {log_file_path} not found.", style="bold red")
         return
 
+    # Determine timezone
+    tz = None
+    if timezone:
+        try:
+            tz = ZoneInfo(timezone)
+        except Exception:
+            console.print(f"Invalid timezone: {timezone}. Using local time.", style="bold yellow")
+
     price_spec = get_price_spec()
 
     console.print(f"Reading {log_file_path}...")
-    usage_by_model, count, encountered_errors = process_log_file(log_file_path, price_spec)
+    usage_by_model_day, count, encountered_errors = process_log_file(log_file_path, price_spec, timezone=tz)
 
     if encountered_errors:
         console.print("Displaying results processed so far...", style="bold yellow")
@@ -173,58 +317,22 @@ def main(log_file_path: Path, enable_archiving: bool = False, log_simplify_level
         return
 
     console.print(f"\nFound {count} inference events.\n")
-    table = Table(
-        title="Token Usage by Model",
-        show_footer=True,
-        footer_style="bold",
-        title_justify="left",
-    )
 
-    table.add_column("Model", footer="Grand Total", justify="left")
-    table.add_column("Requests", footer_style="bold", justify="right")
-    table.add_column("Input Tokens", footer_style="bold", justify="right")
-    table.add_column("Output Tokens", footer_style="bold", justify="right")
-    table.add_column("Cached Tokens", footer_style="bold", justify="right")
-    table.add_column("Thoughts Tokens", footer_style="bold", justify="right")
-    table.add_column("Cost ($)", footer_style="bold", justify="right")
-    table.add_column("Total", footer_style="bold", justify="right")
+    # Prepare Daily Stats
+    # Group keys by date, then model
+    sorted_keys = sorted(usage_by_model_day.keys(), key=lambda x: (x[1], x[0]))
+    daily_data = [((key[1].isoformat(), key[0]), usage_by_model_day[key]) for key in sorted_keys]
+    print_usage_table("Daily Token Usage", daily_data, console, show_date=True)
 
-    total_req = 0
-    total_input = 0
-    total_output = 0
-    total_cached = 0
-    total_thoughts = 0
-    total_cost = 0.0
+    console.print("\n")
 
-    for model, usage in sorted(usage_by_model.items()):
-        # Cached tokens are part of input, so not added here directly for total
-        total_tokens = usage["input"] + usage["output"] + usage["thoughts"]
-        model_cost = usage.get("cost", 0.0)
-        table.add_row(
-            model,
-            str(usage["count"]),
-            f"{usage['input']:,}",
-            f"{usage['output']:,}",
-            f"{usage['cached']:,}",
-            f"{usage['thoughts']:,}",
-            f"{model_cost:,.6f}",
-            f"{total_tokens:,}",
-        )
-        total_req += usage["count"]
-        total_input += usage["input"]
-        total_output += usage["output"]
-        total_cached += usage["cached"]
-        total_thoughts += usage["thoughts"]
-        total_cost += model_cost
+    # Prepare Overall Stats
+    overall_usage: dict[str, UsageStats] = defaultdict(UsageStats)
+    for (model, _), stats in usage_by_model_day.items():
+        overall_usage[model] += stats
 
-    table.columns[1].footer = str(total_req)
-    table.columns[2].footer = f"{total_input:,}"
-    table.columns[3].footer = f"{total_output:,}"
-    table.columns[4].footer = f"{total_cached:,}"
-    table.columns[5].footer = f"{total_thoughts:,}"
-    table.columns[6].footer = f"{total_cost:,.6f}"
-    table.columns[7].footer = f"{total_input + total_output + total_thoughts:,}"
-    console.print(table)
+    overall_data = sorted(overall_usage.items())
+    print_usage_table("Overall Token Usage by Model", overall_data, console, show_date=False)
 
     if encountered_errors:
         # Return a non-zero exit code

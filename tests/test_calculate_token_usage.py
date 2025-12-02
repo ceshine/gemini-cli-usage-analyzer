@@ -1,6 +1,8 @@
 import json
 import pytest
-from gemini_cli_usage_analyzer.calculate_token_usage import calculate_cost, process_log_file
+from datetime import date, timezone, timedelta
+from zoneinfo import ZoneInfo
+from gemini_cli_usage_analyzer.calculate_token_usage import calculate_cost, process_log_file, UsageStats
 
 
 @pytest.fixture
@@ -90,6 +92,7 @@ def test_process_log_file(tmp_path, price_spec):
                 "model": "model-a",
                 "input_token_count": 1000,
                 "output_token_count": 500,
+                "event.timestamp": "2023-10-26T10:00:00+00:00",
             }
         },
         {
@@ -103,6 +106,16 @@ def test_process_log_file(tmp_path, price_spec):
                 "model": "model-a",
                 "input_token_count": 2000,
                 "output_token_count": 100,
+                "event.timestamp": "2023-10-26T23:00:00+00:00",
+            }
+        },
+        {
+            "attributes": {
+                "event.name": "gemini_cli.api_response",
+                "model": "model-a",
+                "input_token_count": 100,
+                "output_token_count": 50,
+                "event.timestamp": "2023-10-27T01:00:00+00:00",
             }
         },
     ]
@@ -110,29 +123,81 @@ def test_process_log_file(tmp_path, price_spec):
         for entry in entries:
             f.write(json.dumps(entry) + "\n")
 
+    usage, count, error = process_log_file(log_file, price_spec, timezone=ZoneInfo("UTC"))
+
+    assert count == 3
+    assert not error
+
+    key1 = ("model-a", date(2023, 10, 26))
+    key2 = ("model-a", date(2023, 10, 27))
+
+    assert key1 in usage
+    assert key2 in usage
+
+    stats1 = usage[key1]
+    assert isinstance(stats1, UsageStats)
+    assert stats1.count == 2
+    assert stats1.input_tokens == 3000
+    assert stats1.output_tokens == 600
+    assert stats1.cost == pytest.approx(0.0042)
+
+    stats2 = usage[key2]
+    assert stats2.count == 1
+    assert stats2.input_tokens == 100
+    assert stats2.output_tokens == 50
+
+
+def test_process_log_file_timezone_shift(tmp_path, price_spec):
+    log_file = tmp_path / "test_tz.jsonl"
+    # 2023-10-27T01:00:00Z is 2023-10-26 20:00:00 in UTC-5
+    entry = {
+        "attributes": {
+            "event.name": "gemini_cli.api_response",
+            "model": "model-a",
+            "input_token_count": 100,
+            "output_token_count": 50,
+            "event.timestamp": "2023-10-27T01:00:00Z",
+        }
+    }
+    with open(log_file, "w") as f:
+        f.write(json.dumps(entry) + "\n")
+
+    # Test with UTC-5
+    tz = timezone(timedelta(hours=-5))
+
+    usage, count, error = process_log_file(log_file, price_spec, timezone=tz)
+
+    expected_date = date(2023, 10, 26)
+    key = ("model-a", expected_date)
+
+    assert key in usage
+    assert usage[key].count == 1
+
+
+def test_process_log_file_no_timestamp(tmp_path, price_spec):
+    log_file = tmp_path / "test_no_ts.jsonl"
+    entry = {
+        "attributes": {
+            "event.name": "gemini_cli.api_response",
+            "model": "model-a",
+            "input_token_count": 100,
+        }
+    }
+    with open(log_file, "w") as f:
+        f.write(json.dumps(entry) + "\n")
+
     usage, count, error = process_log_file(log_file, price_spec)
 
-    assert count == 2
-    assert not error
-    assert "model-a" in usage
-    assert usage["model-a"]["count"] == 2
-    assert usage["model-a"]["input"] == 3000
-    assert usage["model-a"]["output"] == 600
-
-    # Check total cost
-    # Entry 1: 1000*1e-6 + 500*2e-6 = 0.002
-    # Entry 2: 2000*1e-6 + 100*2e-6 = 0.002 + 0.0002 = 0.0022
-    # Total: 0.0042
-    assert usage["model-a"]["cost"] == pytest.approx(0.0042)
+    assert count == 1
+    key = ("model-a", date.min)
+    assert key in usage
 
 
 def test_process_log_file_error(tmp_path, price_spec):
     log_file = tmp_path / "broken.jsonl"
     log_file.write_text('{"valid": "json"}\n{broken json\n')
 
-    # process_log_file expects orjsonl stream, which might fail on broken json
-    # Let's see how orjsonl handles it. It likely raises an error.
-
     usage, count, error = process_log_file(log_file, price_spec)
 
     assert error
+    # Even if error, it might return partial results or empty
