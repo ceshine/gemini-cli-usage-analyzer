@@ -39,12 +39,8 @@ def calculate_cost(attributes: dict[str, Any], price_spec: dict[str, Any]) -> fl
     # Check for tiered pricing based on context length
     # Assuming input_tokens represents the total context size (including cached)
     if input_tokens > 200000:
-        input_cost_per_token = model_price_spec.get(
-            "input_cost_per_token_above_200k_tokens", input_cost_per_token
-        )
-        output_cost_per_token = model_price_spec.get(
-            "output_cost_per_token_above_200k_tokens", output_cost_per_token
-        )
+        input_cost_per_token = model_price_spec.get("input_cost_per_token_above_200k_tokens", input_cost_per_token)
+        output_cost_per_token = model_price_spec.get("output_cost_per_token_above_200k_tokens", output_cost_per_token)
         cached_cost_per_token = model_price_spec.get(
             "cache_read_input_token_cost_above_200k_tokens", cached_cost_per_token
         )
@@ -119,7 +115,7 @@ def main(log_file_path: Path):
         log_file_path (Path): Path to the log file to analyze.
     """
     console = Console()
-    price_spec = get_price_spec(cache_path=Path(".gemini/prices_cache.json"))
+    price_spec = get_price_spec()
 
     if not os.path.exists(log_file_path):
         console.print(f"Error: {log_file_path} not found.", style="bold red")

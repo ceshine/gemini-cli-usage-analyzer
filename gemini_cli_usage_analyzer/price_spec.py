@@ -1,3 +1,4 @@
+import os
 import time
 import urllib.request
 from pathlib import Path
@@ -27,12 +28,13 @@ def _fetch_from_url() -> dict[str, Any]:
         raise RuntimeError(f"Failed to fetch price spec from {URL}") from e
 
 
-def get_price_spec(cache_path: str | Path | None = None, update_interval_seconds: int = 86400) -> dict[str, Any]:
+def get_price_spec(update_interval_seconds: int = 86400) -> dict[str, Any]:
     """Fetches the LLM price spec mapping from the remote URL, with local caching.
 
+    The cache path is determined by the `GEMINI_CLI_PRICE_CACHE_PATH` environment variable.
+    If the variable is not set or empty, caching is disabled.
+
     Args:
-        cache_path (str | Path | None): The path to the local cache file. If None, the data is fetched
-            directly from the URL without caching.
         update_interval_seconds (int): The minimum interval in seconds to update the cache.
             Defaults to 86400 (24 hours).
 
@@ -42,10 +44,12 @@ def get_price_spec(cache_path: str | Path | None = None, update_interval_seconds
     Raises:
         RuntimeError: If fetching from the URL fails and no valid cache is available.
     """
-    if cache_path is None:
+    cache_path_str = os.environ.get("PRICE_CACHE_PATH")
+
+    if not cache_path_str:
         return _fetch_from_url()
 
-    cache_file = Path(cache_path)
+    cache_file = Path(cache_path_str)
 
     # Check if cache exists and is fresh enough
     if cache_file.exists():
