@@ -31,7 +31,7 @@ def _fetch_from_url() -> dict[str, Any]:
 def get_price_spec(update_interval_seconds: int = 86400) -> dict[str, Any]:
     """Fetches the LLM price spec mapping from the remote URL, with local caching.
 
-    The cache path is determined by the `GEMINI_CLI_PRICE_CACHE_PATH` environment variable.
+    The cache path is determined by the `PRICE_CACHE_PATH` environment variable.
     If the variable is not set or empty, caching is disabled.
 
     Args:

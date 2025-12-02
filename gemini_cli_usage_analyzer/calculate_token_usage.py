@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 from collections import defaultdict
 from collections.abc import MutableMapping
@@ -10,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .price_spec import get_price_spec
+from .convert_logs import main as convert_log_file
 
 
 def calculate_cost(attributes: dict[str, Any], price_spec: dict[str, Any]) -> float:
@@ -60,7 +62,7 @@ def process_log_file(
     """Processes a log file to aggregate token usage and cost by model.
 
     Args:
-        log_file_path (Path): The path to the log file (JSONL format expected).
+        log_file_path (Path): The path to the log file.
         price_spec (dict[str, Any]): The price specification dictionary.
 
     Returns:
@@ -108,21 +110,49 @@ def process_log_file(
     return usage_by_model, count, encountered_errors
 
 
-def main(log_file_path: Path):
+def main(log_file_path: Path, disable_archiving: bool = False):
     """Calculates and displays token usage and cost from a Gemini CLI log file.
 
     Args:
-        log_file_path (Path): Path to the log file to analyze.
+        log_file_path (Path): Path to the JSONL log file to analyze.
+          - If a folder is provided, the default `telemetry.log` file will be converted into `telemetry.jsonl`, and the `telemetry.log` will be moved to `/tmp` folder automatically.
+          - If a .jsonl file is provided, it will be processed directly.
+        disable_archiving (bool): Disable archiving (moving to `/tmp`) when a folder is provided as `log_file_path`.
     """
     console = Console()
-    price_spec = get_price_spec()
 
-    if not os.path.exists(log_file_path):
+    if log_file_path.is_dir():
+        # Try to find the the default file in the specified folder
+        if (log_file_path / "telemetry.log").exists():
+            source_log_file = log_file_path / "telemetry.log"
+        elif (log_file_path / ".gemini" / "telemetry.log").exists():
+            source_log_file = log_file_path / ".gemini" / "telemetry.log"
+        else:
+            raise typer.BadParameter(
+                f"Could not find telemetry.log in {log_file_path} nor in {log_file_path / '.gemini'}"
+            )
+        log_file_path = convert_log_file(
+            source_log_file,
+            source_log_file.parent / "telemetry.jsonl",
+            simplify_level=1,
+            simplify=True,
+            archiving_enabled=not disable_archiving,
+            archive_folder_path=Path("/tmp"),
+        )
+        console.print(
+            f"Converted {source_log_file} to {log_file_path} with archiving [bold]{'ENABLED' if not disable_archiving else 'DISABLED'}[/bold]",
+            style="green",
+        )
+    elif log_file_path.suffix != ".jsonl":
+        raise typer.BadParameter(f"Log file must be a .jsonl file, got {log_file_path}")
+
+    if not log_file_path.exists():
         console.print(f"Error: {log_file_path} not found.", style="bold red")
         return
 
-    console.print(f"Reading {log_file_path}...")
+    price_spec = get_price_spec()
 
+    console.print(f"Reading {log_file_path}...")
     usage_by_model, count, encountered_errors = process_log_file(log_file_path, price_spec)
 
     if encountered_errors:
@@ -192,4 +222,10 @@ def main(log_file_path: Path):
 
 
 if __name__ == "__main__":
+    os.environ["PRICE_CACHE_PATH"] = "~/.gemini/prices.json"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s][%(levelname)s][%(name)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
     typer.run(main)

@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -9,6 +10,9 @@ import orjson
 import typer
 
 from .simplify_logs import SimplificationLevel, simplify_record
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def get_last_timestamp(file_path: Path) -> str | None:
@@ -57,6 +61,7 @@ def get_last_timestamp(file_path: Path) -> str | None:
                             # Attempt to parse the JSON and return the timestamp
                             return orjson.loads(last_line)["attributes"]["event.timestamp"]
                         except orjson.JSONDecodeError:
+                            LOGGER.warning("Invalid JSON string found: %s", last_line)
                             # If the last line is incomplete/corrupt, ignore it and continue
                             pass
 
@@ -67,6 +72,7 @@ def get_last_timestamp(file_path: Path) -> str | None:
                             try:
                                 return orjson.loads(line)["attributes"]["event.timestamp"]
                             except orjson.JSONDecodeError:
+                                LOGGER.warning("Invalid JSON string found: %s", line)
                                 continue
 
                     # The first part of the chunk might be the end of a line
@@ -185,9 +191,7 @@ def main(
         "--simplify-level",
         help="Simplification level. 0: None, 1: Events Only. Defaults to 0.",
     ),
-    archiving_enabled: bool = typer.Option(
-        False, "--enable-archiving", help="Enable archiving of the input log file."
-    ),
+    archiving_enabled: bool = typer.Option(False, "--enable-archiving", help="Enable archiving of the input log file."),
     archive_folder_path: Path = typer.Option(
         "/tmp",
         "--archive-folder",
@@ -235,9 +239,7 @@ def main(
         effective_level = SimplificationLevel.EVENTS_ONLY.value
 
     try:
-        count, skipped_count = convert_log_file(
-            input_file_path, output_file_path, last_timestamp, effective_level
-        )
+        count, skipped_count = convert_log_file(input_file_path, output_file_path, last_timestamp, effective_level)
 
         typer.echo(f"Successfully converted {count} records to {output_file_path} (Skipped {skipped_count})")
 
@@ -245,12 +247,14 @@ def main(
             archive_folder_path.mkdir(exist_ok=True, parents=True)
             new_file_name = f"{input_file_path.stem}.{int(datetime.now().timestamp())}{input_file_path.suffix}"
             new_file_path = archive_folder_path / new_file_name
-            shutil.move(input_file_path, new_file_path)
+            _ = shutil.move(input_file_path, new_file_path)
             typer.echo(f"Archived {input_file_path} to {new_file_path}")
 
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
+
+    return output_file_path
 
 
 if __name__ == "__main__":
