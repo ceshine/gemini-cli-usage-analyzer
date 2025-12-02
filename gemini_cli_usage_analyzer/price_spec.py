@@ -9,6 +9,14 @@ URL = "https://raw.githubusercontent.com/BerriAI/litellm/refs/heads/main/model_p
 
 
 def _fetch_from_url() -> dict[str, Any]:
+    """Fetches the latest price specification from the remote URL.
+
+    Returns:
+        A dictionary containing the model pricing information.
+
+    Raises:
+        RuntimeError: If the HTTP request fails or returns a non-200 status code.
+    """
     try:
         with urllib.request.urlopen(URL) as response:
             if response.status != 200:
@@ -20,17 +28,19 @@ def _fetch_from_url() -> dict[str, Any]:
 
 
 def get_price_spec(cache_path: str | Path | None = None, update_interval_seconds: int = 86400) -> dict[str, Any]:
-    """
-    Fetches the LLM price spec mapping from the remote URL, with local caching.
+    """Fetches the LLM price spec mapping from the remote URL, with local caching.
 
     Args:
-        cache_path: The path to the local cache file. If None, the data is fetched
-                    directly from the URL without caching.
-        update_interval_seconds: The minimum interval in seconds to update the cache.
-                                 Defaults to 86400 (24 hours).
+        cache_path (str | Path | None): The path to the local cache file. If None, the data is fetched
+            directly from the URL without caching.
+        update_interval_seconds (int): The minimum interval in seconds to update the cache.
+            Defaults to 86400 (24 hours).
 
     Returns:
-        The price spec dictionary.
+        A dictionary containing the price specification for various models.
+
+    Raises:
+        RuntimeError: If fetching from the URL fails and no valid cache is available.
     """
     if cache_path is None:
         return _fetch_from_url()

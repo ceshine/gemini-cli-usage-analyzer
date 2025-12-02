@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from collections import defaultdict
 from collections.abc import MutableMapping
+from typing import Any
 
 import orjsonl
 import typer
@@ -11,21 +12,73 @@ from rich.table import Table
 from .price_spec import get_price_spec
 
 
-def main(log_file_path: Path):
-    console = Console()
-    price_spec = get_price_spec(cache_path=Path(".gemini/prices_cache.json"))
-    usage_by_model: MutableMapping[str, dict[str, int]] = defaultdict(
-        lambda: {"input": 0, "output": 0, "cached": 0, "thoughts": 0, "count": 0}
+def calculate_cost(attributes: dict[str, Any], price_spec: dict[str, Any]) -> float:
+    """Calculates the cost of an inference event based on token usage and price specification.
+
+    Args:
+        attributes (dict[str, Any]): The attributes dictionary from the log entry containing token counts and model info.
+        price_spec (dict[str, Any]): The entire price specification dictionary mapping model names to their pricing details.
+
+    Returns:
+        The calculated cost (float) in USD.
+    """
+    model = attributes.get("model", "unknown")
+    input_tokens = attributes.get("input_token_count") or 0
+    output_tokens = attributes.get("output_token_count") or 0
+    cached_tokens = attributes.get("cached_content_token_count") or 0
+    thoughts_tokens = attributes.get("thoughts_token_count") or 0
+
+    # Get price information for the model
+    model_price_spec = price_spec.get(model, {})
+
+    input_cost_per_token = model_price_spec.get("input_cost_per_token", 0)
+    output_cost_per_token = model_price_spec.get("output_cost_per_token", 0)
+    # Use cache_read_input_token_cost for cached tokens if available
+    cached_cost_per_token = model_price_spec.get("cache_read_input_token_cost", 0)
+
+    # Check for tiered pricing based on context length
+    # Assuming input_tokens represents the total context size (including cached)
+    if input_tokens > 200000:
+        input_cost_per_token = model_price_spec.get(
+            "input_cost_per_token_above_200k_tokens", input_cost_per_token
+        )
+        output_cost_per_token = model_price_spec.get(
+            "output_cost_per_token_above_200k_tokens", output_cost_per_token
+        )
+        cached_cost_per_token = model_price_spec.get(
+            "cache_read_input_token_cost_above_200k_tokens", cached_cost_per_token
+        )
+
+    # Calculate cost for this entry
+    cost = (
+        ((input_tokens - cached_tokens) * input_cost_per_token)
+        + ((output_tokens + thoughts_tokens) * output_cost_per_token)
+        + (cached_tokens * cached_cost_per_token)
     )
+    return cost
 
-    if not os.path.exists(log_file_path):
-        console.print(f"Error: {log_file_path} not found.", style="bold red")
-        return
 
-    console.print(f"Reading {log_file_path}...")
+def process_log_file(
+    log_file_path: Path, price_spec: dict[str, Any]
+) -> tuple[MutableMapping[str, dict[str, int | float]], int, bool]:
+    """Processes a log file to aggregate token usage and cost by model.
 
+    Args:
+        log_file_path (Path): The path to the log file (JSONL format expected).
+        price_spec (dict[str, Any]): The price specification dictionary.
+
+    Returns:
+        A tuple containing:
+            - A dictionary (MutableMapping[str, dict[str, int | float]]) mapping model names to usage statistics (input, output, cached, thoughts, count, cost).
+            - The total count (int) of processed inference events.
+            - A boolean (bool) indicating if any errors were encountered during processing.
+    """
+    usage_by_model: MutableMapping[str, dict[str, int | float]] = defaultdict(
+        lambda: {"input": 0, "output": 0, "cached": 0, "thoughts": 0, "count": 0, "cost": 0.0}
+    )
     count = 0
     encountered_errors = False
+
     try:
         for entry in orjsonl.stream(log_file_path):
             assert isinstance(entry, dict), f"Got an unexpected entry that is not a dict {entry}"
@@ -34,50 +87,50 @@ def main(log_file_path: Path):
 
             if event_name == "gemini_cli.api_response":
                 model = attributes.get("model", "unknown")
-                input_tokens = attributes.get("input_token_count") or 0
-                output_tokens = attributes.get("output_token_count") or 0
-                cached_tokens = attributes.get("cached_content_token_count") or 0
-                thoughts_tokens = attributes.get("thoughts_token_count") or 0
+                input_tokens = int(attributes.get("input_token_count") or 0)
+                output_tokens = int(attributes.get("output_token_count") or 0)
+                cached_tokens = int(attributes.get("cached_content_token_count") or 0)
+                thoughts_tokens = int(attributes.get("thoughts_token_count") or 0)
 
-                # Get price information for the model
-                model_price_spec = price_spec.get(model, {})
+                cost = calculate_cost(attributes, price_spec)
 
-                input_cost_per_token = model_price_spec.get("input_cost_per_token", 0)
-                output_cost_per_token = model_price_spec.get("output_cost_per_token", 0)
-                # Use cache_read_input_token_cost for cached tokens if available
-                cached_cost_per_token = model_price_spec.get("cache_read_input_token_cost", 0)
-
-                # Check for tiered pricing based on context length
-                # Assuming input_tokens represents the total context size (including cached)
-                if input_tokens > 200000:
-                    input_cost_per_token = model_price_spec.get(
-                        "input_cost_per_token_above_200k_tokens", input_cost_per_token
-                    )
-                    output_cost_per_token = model_price_spec.get(
-                        "output_cost_per_token_above_200k_tokens", output_cost_per_token
-                    )
-                    cached_cost_per_token = model_price_spec.get(
-                        "cache_read_input_token_cost_above_200k_tokens", cached_cost_per_token
-                    )
-
-                # Calculate cost for this entry
-                cost = (
-                    ((input_tokens - cached_tokens) * input_cost_per_token)
-                    + ((output_tokens + thoughts_tokens) * output_cost_per_token)
-                    + (cached_tokens * cached_cost_per_token)
-                )
-
-                usage_by_model[model]["input"] += int(input_tokens)
-                usage_by_model[model]["output"] += int(output_tokens)
-                usage_by_model[model]["cached"] += int(cached_tokens)
-                usage_by_model[model]["thoughts"] += int(thoughts_tokens)
+                usage_by_model[model]["input"] += input_tokens
+                usage_by_model[model]["output"] += output_tokens
+                usage_by_model[model]["cached"] += cached_tokens
+                usage_by_model[model]["thoughts"] += thoughts_tokens
                 usage_by_model[model]["count"] += 1
-                usage_by_model[model]["cost"] = usage_by_model[model].get("cost", 0.0) + cost
+                usage_by_model[model]["cost"] += cost
                 count += 1
     except Exception as e:
-        console.print(f"\nWarning: Error occurred while processing logs: {e}", style="bold yellow")
-        console.print("Displaying results processed so far...", style="bold yellow")
+        # We print the error here as in original code, or we could return it.
+        # The original code printed it. To separate concerns properly, maybe we should
+        # just return the fact that an error occurred, and maybe the exception itself?
+        # For now, to keep it simple and compatible with main's expectation:
+        print(f"\nWarning: Error occurred while processing logs: {e}")
         encountered_errors = True
+
+    return usage_by_model, count, encountered_errors
+
+
+def main(log_file_path: Path):
+    """Calculates and displays token usage and cost from a Gemini CLI log file.
+
+    Args:
+        log_file_path (Path): Path to the log file to analyze.
+    """
+    console = Console()
+    price_spec = get_price_spec(cache_path=Path(".gemini/prices_cache.json"))
+
+    if not os.path.exists(log_file_path):
+        console.print(f"Error: {log_file_path} not found.", style="bold red")
+        return
+
+    console.print(f"Reading {log_file_path}...")
+
+    usage_by_model, count, encountered_errors = process_log_file(log_file_path, price_spec)
+
+    if encountered_errors:
+        console.print("Displaying results processed so far...", style="bold yellow")
 
     if count == 0:
         console.print("No inference events found in the log.")
