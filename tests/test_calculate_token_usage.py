@@ -2,6 +2,7 @@ import json
 import pytest
 from gemini_cli_usage_analyzer.calculate_token_usage import calculate_cost, process_log_file
 
+
 @pytest.fixture
 def price_spec():
     return {
@@ -15,6 +16,7 @@ def price_spec():
         }
     }
 
+
 def test_calculate_cost_basic(price_spec):
     attributes = {
         "model": "model-a",
@@ -26,6 +28,7 @@ def test_calculate_cost_basic(price_spec):
     # cost = 1000 * 1e-6 + 500 * 2e-6 = 0.001 + 0.001 = 0.002
     cost = calculate_cost(attributes, price_spec)
     assert cost == pytest.approx(0.002)
+
 
 def test_calculate_cost_cached(price_spec):
     attributes = {
@@ -40,6 +43,7 @@ def test_calculate_cost_cached(price_spec):
     cost = calculate_cost(attributes, price_spec)
     assert cost == pytest.approx(0.0008)
 
+
 def test_calculate_cost_tiered(price_spec):
     attributes = {
         "model": "model-a",
@@ -53,6 +57,7 @@ def test_calculate_cost_tiered(price_spec):
     cost = calculate_cost(attributes, price_spec)
     assert cost == pytest.approx(0.37525)
 
+
 def test_calculate_cost_thoughts(price_spec):
     attributes = {
         "model": "model-a",
@@ -65,6 +70,7 @@ def test_calculate_cost_thoughts(price_spec):
     cost = calculate_cost(attributes, price_spec)
     assert cost == pytest.approx(0.0003)
 
+
 def test_calculate_cost_unknown_model(price_spec):
     attributes = {
         "model": "unknown-model",
@@ -73,6 +79,7 @@ def test_calculate_cost_unknown_model(price_spec):
     # defaults to 0
     cost = calculate_cost(attributes, price_spec)
     assert cost == 0.0
+
 
 def test_process_log_file(tmp_path, price_spec):
     log_file = tmp_path / "test.jsonl"
@@ -97,34 +104,35 @@ def test_process_log_file(tmp_path, price_spec):
                 "input_token_count": 2000,
                 "output_token_count": 100,
             }
-        }
+        },
     ]
     with open(log_file, "w") as f:
         for entry in entries:
             f.write(json.dumps(entry) + "\n")
 
     usage, count, error = process_log_file(log_file, price_spec)
-    
+
     assert count == 2
     assert not error
     assert "model-a" in usage
     assert usage["model-a"]["count"] == 2
     assert usage["model-a"]["input"] == 3000
     assert usage["model-a"]["output"] == 600
-    
+
     # Check total cost
     # Entry 1: 1000*1e-6 + 500*2e-6 = 0.002
     # Entry 2: 2000*1e-6 + 100*2e-6 = 0.002 + 0.0002 = 0.0022
     # Total: 0.0042
     assert usage["model-a"]["cost"] == pytest.approx(0.0042)
 
+
 def test_process_log_file_error(tmp_path, price_spec):
     log_file = tmp_path / "broken.jsonl"
     log_file.write_text('{"valid": "json"}\n{broken json\n')
-    
+
     # process_log_file expects orjsonl stream, which might fail on broken json
     # Let's see how orjsonl handles it. It likely raises an error.
-    
+
     usage, count, error = process_log_file(log_file, price_spec)
-    
+
     assert error

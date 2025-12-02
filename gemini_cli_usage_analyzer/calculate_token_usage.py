@@ -135,7 +135,6 @@ def main(log_file_path: Path, disable_archiving: bool = False):
             source_log_file,
             source_log_file.parent / "telemetry.jsonl",
             simplify_level=1,
-            simplify=True,
             archiving_enabled=not disable_archiving,
             archive_folder_path=Path("/tmp"),
         )

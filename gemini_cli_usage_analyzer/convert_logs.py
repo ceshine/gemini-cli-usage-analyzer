@@ -9,7 +9,7 @@ from pathlib import Path
 import orjson
 import typer
 
-from .simplify_logs import SimplificationLevel, simplify_record
+from .simplify_logs import simplify_record
 
 
 LOGGER = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ def convert_log_file(
         last_timestamp (str | None): If provided, only entries with a timestamp strictly greater
             than this value will be processed.
         simplify_level (int): The level of simplification to apply to log records.
-            See `SimplificationLevel` for details.
+            Refer to the `simplify_logs` module for more details.
 
     Returns:
         A tuple containing:
@@ -181,11 +181,6 @@ def main(
         help="Path to the output JSONL file. Defaults to the same location of the input file path, but with the suffix changed to .jsonl",
         writable=True,
     ),
-    simplify: bool = typer.Option(
-        False,
-        "--simplify",
-        help="(Deprecated) Only keep objects whose 'attributes' field's 'event.name' value is 'gemini_cli.api_response' or 'gemini_cli.api_request'. Use --simplify-level instead.",
-    ),
     simplify_level: int = typer.Option(
         0,
         "--simplify-level",
@@ -217,7 +212,6 @@ def main(
     Args:
         input_file_path (Path): Path to the input log file.
         output_file_path (Path | None): Path to the output JSONL file. Defaults to input path with .jsonl extension.
-        simplify (bool): (Deprecated) Boolean flag to enable event-only simplification.
         simplify_level (int): Integer level for simplification (0=None, 1: Events Only).
         archiving_enabled (bool): If True, moves the input file to an archive folder after processing.
         archive_folder_path (Path): Destination folder for archived log files.
@@ -233,13 +227,8 @@ def main(
     else:
         typer.echo("Starting fresh conversion...")
 
-    # Determine effective simplification level
-    effective_level = simplify_level
-    if simplify and effective_level == 0:
-        effective_level = SimplificationLevel.EVENTS_ONLY.value
-
     try:
-        count, skipped_count = convert_log_file(input_file_path, output_file_path, last_timestamp, effective_level)
+        count, skipped_count = convert_log_file(input_file_path, output_file_path, last_timestamp, simplify_level)
 
         typer.echo(f"Successfully converted {count} records to {output_file_path} (Skipped {skipped_count})")
 
