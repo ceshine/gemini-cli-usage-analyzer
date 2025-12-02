@@ -16,7 +16,7 @@ from .price_spec import get_price_spec
 from .convert_logs import main as convert_log_file
 
 LOGGER = logging.getLogger(__name__)
-
+TYPER_APP = typer.Typer()
 TABLE_ROW_STYLES = ["white", "yellow"]
 
 
@@ -246,6 +246,7 @@ def print_usage_table(
     console.print(table)
 
 
+@TYPER_APP.command()
 def main(
     log_file_path: Path,
     enable_archiving: bool = False,
@@ -385,4 +386,4 @@ if __name__ == "__main__":
         format="[%(asctime)s][%(levelname)s][%(name)s] %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
-    typer.run(main)
+    TYPER_APP()
