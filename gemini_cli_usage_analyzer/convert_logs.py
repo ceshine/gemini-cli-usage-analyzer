@@ -2,11 +2,13 @@
 
 import os
 import shutil
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-import typer
 import orjson
+import typer
+
+from .simplify_logs import SimplificationLevel, simplify_record
 
 
 def get_last_timestamp(file_path: Path) -> str | None:
@@ -87,7 +89,12 @@ def main(
     simplify: bool = typer.Option(
         False,
         "--simplify",
-        help="Only keep objects whose 'attributes' field's 'event.name' value is 'gemini_cli.api_response' or 'gemini_cli.api_request'.",
+        help="(Deprecated) Only keep objects whose 'attributes' field's 'event.name' value is 'gemini_cli.api_response' or 'gemini_cli.api_request'. Use --simplify-level instead.",
+    ),
+    simplify_level: int = typer.Option(
+        0,
+        "--simplify-level",
+        help="Simplification level. 0: None, 1: Events Only. Defaults to 0.",
     ),
     archiving_disabled: bool = typer.Option(
         False, "--disable-archiving", help="Disable archiving of the input log file."
@@ -108,8 +115,7 @@ def main(
 
     - **Incremental Updates**: Skips records with timestamps earlier than or equal to the
       last recorded timestamp in the output file.
-    - **Simplification**: Optionally filters records to only include 'gemini_cli.api_response'
-      and 'gemini_cli.api_request' events.
+    - **Simplification**: Optionally filters records based on the specified simplification level.
     - **Robust Parsing**: Accumulatively reads lines and parses JSON objects, handling potential
       formatting issues in raw logs.
     - **Archiving**: Optionally moves the processed input file to an archive directory with
@@ -130,6 +136,11 @@ def main(
     else:
         typer.echo("Starting fresh conversion...")
 
+    # Determine effective simplification level
+    effective_level = simplify_level
+    if simplify and effective_level == 0:
+        effective_level = SimplificationLevel.EVENTS_ONLY.value
+
     try:
         # Open input in text mode (utf-8) and output in binary mode (for orjson)
         with open(input_file_path, "r", encoding="utf-8") as f_in, open(output_file_path, mode) as f_out:
@@ -143,31 +154,26 @@ def main(
                     try:
                         # Attempt to parse the accumulated buffer
                         obj = orjson.loads(buffer)
+                        # Clear buffer
+                        buffer = ""
                         attributes = obj.get("attributes", {})
 
                         # Pre-write validation: Ensure event.timestamp exists
                         current_ts = attributes.get("event.timestamp")
                         if not current_ts:
-                            buffer = ""
                             continue
-
-                        should_write = True
 
                         # Incremental check
                         if last_timestamp and current_ts <= last_timestamp:
-                            should_write = False
                             skipped_count += 1
+                            continue
 
-                        if simplify and should_write:
-                            event_name = attributes.get("event.name")
-                            if event_name not in ("gemini_cli.api_response", "gemini_cli.api_request"):
-                                should_write = False
+                        if (obj := simplify_record(obj, effective_level)) is None:
+                            continue
 
                         # If successful, write to output and reset buffer
-                        if should_write:
-                            _ = f_out.write(orjson.dumps(obj) + b"\n")
-                            count += 1
-                        buffer = ""
+                        _ = f_out.write(orjson.dumps(obj) + b"\n")
+                        count += 1
                     except orjson.JSONDecodeError:
                         # Buffer might contain a nested object ending in '}', or incomplete data
                         # Continue accumulating
