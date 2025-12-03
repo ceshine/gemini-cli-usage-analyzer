@@ -14,7 +14,7 @@ from rich.table import Table
 
 from . import __version__
 from .price_spec import get_price_spec
-from .convert_logs import main as convert_log_file
+from .convert_logs import run_log_conversion
 
 LOGGER = logging.getLogger(__name__)
 TYPER_APP = typer.Typer()
@@ -250,18 +250,12 @@ def print_usage_table(
     console.print(table)
 
 
-@TYPER_APP.command()
-def main(
+def analyze_token_usage(
     log_file_path: Path,
     enable_archiving: bool = False,
     log_simplify_level: int = 1,
-    timezone: str = typer.Option(
-        None,
-        "--timezone",
-        "-tz",
-        help="Timezone to use for daily stats (e.g., 'UTC', 'America/New_York'). Defaults to local system time.",
-    ),
-):
+    timezone: str | None = None,
+) -> int:
     """Calculates and displays token usage and cost from a Gemini CLI log file.
 
     Args:
@@ -271,7 +265,10 @@ def main(
           - If a .jsonl file is provided, it will be processed directly.
         enable_archiving (bool): Enable archiving (moving to `/tmp`) when a folder is provided as `log_file_path`. Only enable it if no Gemini CLI is currently running.
         log_simplify_level (int): Level of simplification for the JSONL log file. Available levels: 0 (no simplification), 1 (default), 2 (trim fields), and 3 (trim attributes)
-        timezone (str): Timezone string for daily aggregation.
+        timezone (str | None): Timezone string for daily aggregation.
+
+    Returns:
+        int: Exit code (0 for success, non-zero for failure).
     """
     console = Console()
 
@@ -289,11 +286,11 @@ def main(
         elif (log_file_path / ".gemini" / "telemetry.jsonl").exists():
             jsonl_file = log_file_path / ".gemini" / "telemetry.jsonl"
         else:
-            raise typer.BadParameter(
+            raise FileNotFoundError(
                 f"Could not find telemetry.log or telemetry.jsonl in {log_file_path} nor in its '.gemini' or 'gemini' subdirectories."
             )
         if source_log_file is not None and jsonl_file is None:
-            log_file_path = convert_log_file(
+            log_file_path = run_log_conversion(
                 source_log_file,
                 source_log_file.parent / "telemetry.jsonl",
                 simplify_level=log_simplify_level,
@@ -310,11 +307,11 @@ def main(
         else:
             raise RuntimeError("Incorrect combination of the `source_log_file` and the `jsonl_file` values.")
     elif log_file_path.suffix != ".jsonl":
-        raise typer.BadParameter(f"Log file must be a .jsonl file, got {log_file_path}")
+        raise ValueError(f"Log file must be a .jsonl file, got {log_file_path}")
 
     if not log_file_path.exists():
         console.print(f"Error: {log_file_path} not found.", style="bold red")
-        return
+        return 1
 
     # Determine timezone
     tz = None
@@ -334,7 +331,7 @@ def main(
 
     if count == 0:
         console.print("No inference events found in the log.")
-        return
+        return 0
 
     console.print(f"\nFound {count} inference events.\n")
 
@@ -381,8 +378,39 @@ def main(
     print_usage_table("Overall Token Usage by Model", overall_data, console, show_date=False)
 
     if encountered_errors:
-        # Return a non-zero exit code
-        raise typer.Exit(1)
+        return 1
+    return 0
+
+
+@TYPER_APP.command()
+def main(
+    log_file_path: Path,
+    enable_archiving: bool = False,
+    log_simplify_level: int = 1,
+    timezone: str = typer.Option(
+        None,
+        "--timezone",
+        "-tz",
+        help="Timezone to use for daily stats (e.g., 'UTC', 'America/New_York'). Defaults to local system time.",
+    ),
+):
+    """Calculates and displays token usage and cost from a Gemini CLI log file.
+
+    Args:
+        log_file_path (Path): Path to the JSONL log file to analyze.
+          - If a folder is provided, it attempts to find `telemetry.log` (or `.gemini/telemetry.log`) to convert.
+          - It also checks for `telemetry.jsonl` (or `gemini/telemetry.jsonl`) to use directly if no log file is found.
+          - If a .jsonl file is provided, it will be processed directly.
+        enable_archiving (bool): Enable archiving (moving to `/tmp`) when a folder is provided as `log_file_path`. Only enable it if no Gemini CLI is currently running.
+        log_simplify_level (int): Level of simplification for the JSONL log file. Available levels: 0 (no simplification), 1 (default), 2 (trim fields), and 3 (trim attributes)
+        timezone (str): Timezone string for daily aggregation.
+    """
+    try:
+        exit_code = analyze_token_usage(log_file_path, enable_archiving, log_simplify_level, timezone)
+        if exit_code != 0:
+            raise typer.Exit(exit_code)
+    except (FileNotFoundError, ValueError) as e:
+        raise typer.BadParameter(str(e))
 
 
 if __name__ == "__main__":

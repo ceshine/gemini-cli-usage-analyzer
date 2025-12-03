@@ -1,6 +1,8 @@
 import json
 import orjson
-from gemini_cli_usage_analyzer.convert_logs import convert_log_file, get_last_timestamp
+import pytest
+import logging
+from gemini_cli_usage_analyzer.convert_logs import convert_log_file, get_last_timestamp, run_log_conversion
 
 
 def test_get_last_timestamp_empty(tmp_path):
@@ -46,21 +48,10 @@ def test_convert_log_file_basic(tmp_path):
     input_file = tmp_path / "input.log"
     output_file = tmp_path / "output.jsonl"
 
-    # Create input file with concatenated JSON (pretty printed or just separated)
-    # The tool supports concatenated objects that might span lines.
-
     data = [
         {"attributes": {"event.timestamp": "t1", "event.name": "e1"}},
         {"attributes": {"event.timestamp": "t2", "event.name": "e2"}},
     ]
-
-    # Emulate the format:
-    # {
-    #   ...
-    # }
-    # {
-    #   ...
-    # }
 
     with open(input_file, "w") as f:
         for item in data:
@@ -128,3 +119,50 @@ def test_convert_log_file_simplify(tmp_path):
     lines = output_file.read_text().strip().split("\n")
     assert len(lines) == 1
     assert json.loads(lines[0])["attributes"]["event.timestamp"] == "t1"
+
+
+def test_run_log_conversion_success(tmp_path, caplog):
+    input_file = tmp_path / "input.log"
+    output_file = tmp_path / "output.jsonl"
+
+    data = [
+        {"attributes": {"event.timestamp": "t1", "event.name": "e1"}},
+    ]
+    with open(input_file, "w") as f:
+        f.write(json.dumps(data[0], indent=2))
+        f.write("\n")
+
+    with caplog.at_level(logging.INFO):
+        ret = run_log_conversion(input_file, output_file)
+        assert ret == output_file
+        assert output_file.exists()
+
+    assert "Starting fresh conversion" in caplog.text
+    assert "Successfully converted 1 records" in caplog.text
+
+
+def test_run_log_conversion_missing_input(tmp_path):
+    input_file = tmp_path / "missing.log"
+    with pytest.raises(FileNotFoundError):
+        run_log_conversion(input_file)
+
+
+def test_run_log_conversion_archive(tmp_path, caplog):
+    input_file = tmp_path / "input.log"
+    archive_dir = tmp_path / "archive"
+
+    data = [
+        {"attributes": {"event.timestamp": "t1", "event.name": "e1"}},
+    ]
+    with open(input_file, "w") as f:
+        f.write(json.dumps(data[0], indent=2))
+        f.write("\n")
+
+    with caplog.at_level(logging.INFO):
+        ret = run_log_conversion(input_file, archiving_enabled=True, archive_folder_path=archive_dir)
+
+    assert ret == input_file.with_suffix(".jsonl")
+    assert not input_file.exists()  # Should be moved
+    assert archive_dir.exists()
+    assert len(list(archive_dir.glob("input.*.log"))) == 1
+    assert "Archived" in caplog.text

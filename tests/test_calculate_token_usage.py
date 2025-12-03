@@ -1,8 +1,13 @@
 import json
 import pytest
-from datetime import date, timezone, timedelta
+from datetime import date
 from zoneinfo import ZoneInfo
-from gemini_cli_usage_analyzer.calculate_token_usage import calculate_cost, process_log_file, UsageStats
+from gemini_cli_usage_analyzer.calculate_token_usage import (
+    calculate_cost,
+    process_log_file,
+    UsageStats,
+    analyze_token_usage,
+)
 
 
 @pytest.fixture
@@ -163,7 +168,7 @@ def test_process_log_file_timezone_shift(tmp_path, price_spec):
         f.write(json.dumps(entry) + "\n")
 
     # Test with UTC-5
-    tz = timezone(timedelta(hours=-5))
+    tz = ZoneInfo("Etc/GMT+5")  # Corrected to ZoneInfo
 
     usage, count, error = process_log_file(log_file, price_spec, timezone=tz)
 
@@ -201,3 +206,39 @@ def test_process_log_file_error(tmp_path, price_spec):
 
     assert error
     # Even if error, it might return partial results or empty
+
+
+def test_analyze_token_usage_success(tmp_path, monkeypatch):
+    # Create a dummy log file
+    log_file = tmp_path / "telemetry.jsonl"
+    log_file.write_text(
+        '{"attributes": {"event.name": "gemini_cli.api_response", "model": "gemini-pro", "input_token_count": 10, "output_token_count": 10, "event.timestamp": "2023-10-26T10:00:00+00:00"}}\n'
+    )
+
+    # Mock get_price_spec to avoid external dependency or file reading if needed
+    # But the real one reads from ~/.gemini/prices.json or defaults.
+    # Assuming defaults work or file exists.
+    # Let's just run it.
+
+    ret_code = analyze_token_usage(log_file)
+    assert ret_code == 0
+
+
+def test_analyze_token_usage_file_not_found(tmp_path):
+    log_file = tmp_path / "nonexistent.jsonl"
+    ret_code = analyze_token_usage(log_file)
+    assert ret_code == 1
+
+
+def test_analyze_token_usage_invalid_extension(tmp_path):
+    log_file = tmp_path / "test.txt"
+    log_file.touch()
+
+    with pytest.raises(ValueError, match="Log file must be a .jsonl file"):
+        analyze_token_usage(log_file)
+
+
+def test_analyze_token_usage_dir_no_file(tmp_path):
+    # Empty directory
+    with pytest.raises(FileNotFoundError, match="Could not find telemetry.log or telemetry.jsonl"):
+        analyze_token_usage(tmp_path)

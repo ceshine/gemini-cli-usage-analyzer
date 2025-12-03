@@ -1,4 +1,4 @@
-"""A script to convert a loose OpenTelemetry log file into an optimized JSONL file."""
+"A script to convert a loose OpenTelemetry log file into an optimized JSONL file."
 
 import os
 import shutil
@@ -161,9 +161,67 @@ def convert_log_file(
                     pass
 
         if buffer.strip():
-            typer.echo("Warning: End of file reached with incomplete JSON data in buffer.", err=True)
+            LOGGER.warning("End of file reached with incomplete JSON data in buffer.")
 
     return count, skipped_count
+
+
+def run_log_conversion(
+    input_file_path: Path,
+    output_file_path: Path | None = None,
+    simplify_level: int = 0,
+    archiving_enabled: bool = False,
+    archive_folder_path: Path = Path("/tmp"),
+) -> Path:
+    """Converts a raw log file to JSONL format and optionally archives the original.
+
+    This function processes the input log file, converting it into a JSON Lines (JSONL) format.
+    It supports incremental updates by checking the last timestamp in the existing output file
+    and appending new records.
+
+    Args:
+        input_file_path (Path): Path to the source log file.
+        output_file_path (Path | None): Path to the destination JSONL file. Defaults to
+            `input_file_path` with a `.jsonl` extension if not provided.
+        simplify_level (int): The level of simplification to apply to log records.
+            Refer to the `simplify_logs` module for more details.
+        archiving_enabled (bool): If True, moves the input file to an archive folder after processing.
+        archive_folder_path (Path): Destination folder for archived log files. Defaults to `/tmp`.
+
+    Returns:
+        Path: The path to the generated or updated JSONL file.
+
+    Raises:
+        FileNotFoundError: If the `input_file_path` does not exist.
+        ValueError: If arguments are invalid (e.g., unexpected data format).
+        Exception: For other errors during conversion or archiving.
+    """
+    if not input_file_path.exists():
+        raise FileNotFoundError(f"Input file not found: {input_file_path}")
+
+    if output_file_path is None:
+        output_file_path = input_file_path.with_suffix(".jsonl")
+
+    # Determine the last timestamp to support incremental updates
+    last_timestamp = get_last_timestamp(output_file_path)
+
+    if last_timestamp:
+        LOGGER.info("Found existing output. Appending new entries after %s...", last_timestamp)
+    else:
+        LOGGER.info("Starting fresh conversion...")
+
+    count, skipped_count = convert_log_file(input_file_path, output_file_path, last_timestamp, simplify_level)
+
+    LOGGER.info("Successfully converted %d records to %s (Skipped %d)", count, output_file_path, skipped_count)
+
+    if archiving_enabled:
+        archive_folder_path.mkdir(exist_ok=True, parents=True)
+        new_file_name = f"{input_file_path.stem}.{int(datetime.now().timestamp())}{input_file_path.suffix}"
+        new_file_path = archive_folder_path / new_file_name
+        _ = shutil.move(input_file_path, new_file_path)
+        LOGGER.info("Archived %s to %s", input_file_path, new_file_path)
+
+    return output_file_path
 
 
 def main(
@@ -216,35 +274,23 @@ def main(
         archiving_enabled (bool): If True, moves the input file to an archive folder after processing.
         archive_folder_path (Path): Destination folder for archived log files.
     """
-    if output_file_path is None:
-        output_file_path = input_file_path.with_suffix(".jsonl")
-
-    # Determine the last timestamp to support incremental updates
-    last_timestamp = get_last_timestamp(output_file_path)
-
-    if last_timestamp:
-        typer.echo(f"Found existing output. Appending new entries after {last_timestamp}...")
-    else:
-        typer.echo("Starting fresh conversion...")
-
     try:
-        count, skipped_count = convert_log_file(input_file_path, output_file_path, last_timestamp, simplify_level)
-
-        typer.echo(f"Successfully converted {count} records to {output_file_path} (Skipped {skipped_count})")
-
-        if archiving_enabled:
-            archive_folder_path.mkdir(exist_ok=True, parents=True)
-            new_file_name = f"{input_file_path.stem}.{int(datetime.now().timestamp())}{input_file_path.suffix}"
-            new_file_path = archive_folder_path / new_file_name
-            _ = shutil.move(input_file_path, new_file_path)
-            typer.echo(f"Archived {input_file_path} to {new_file_path}")
-
+        _ = run_log_conversion(
+            input_file_path=input_file_path,
+            output_file_path=output_file_path,
+            simplify_level=simplify_level,
+            archiving_enabled=archiving_enabled,
+            archive_folder_path=archive_folder_path,
+        )
     except Exception as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
-    return output_file_path
-
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s][%(levelname)s][%(name)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+    )
     typer.run(main)
