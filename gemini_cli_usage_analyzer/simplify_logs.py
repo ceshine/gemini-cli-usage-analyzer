@@ -108,8 +108,18 @@ def run_log_simplification(
             file already exists from a previous failed run.
         RuntimeError: For other unexpected errors during the simplification process.
     """
-    if input_file_path.suffix != ".jsonl":
+    if input_file_path.is_dir():
+        if (input_file_path / "telemetry.jsonl").exists():
+            input_file_path = input_file_path / "telemetry.jsonl"
+        elif (input_file_path / ".gemini" / "telemetry.jsonl").exists():
+            input_file_path = input_file_path / ".gemini" / "telemetry.jsonl"
+        else:
+            raise FileNotFoundError(
+                f"Could not find telemetry.jsonl in {input_file_path} nor in its '.gemini' or 'gemini' subdirectories."
+            )
+    elif input_file_path.suffix != ".jsonl":
         raise ValueError("Input file must be a .jsonl file")
+
     if not input_file_path.exists():
         raise FileNotFoundError("Input file does not exist")
 
@@ -169,7 +179,7 @@ def main(
         ...,
         help="The path to the input JSONL file.",
         exists=True,
-        dir_okay=False,
+        dir_okay=True,
         readable=True,
     ),
     level: int = typer.Option(
@@ -199,7 +209,8 @@ def main(
     and optionally archives or removes the original file.
 
     Args:
-        input_file_path (Path): Path to the input JSONL file.
+        input_file_path (Path): Path to the input JSONL file. If a directory is provided,
+            the command will search for 'telemetry.jsonl' within the directory or its '.gemini' subdirectory.
         level (int): The simplification level to apply.
         archive_folder (Path): Folder to archive the original file to.
         disable_archiving (bool): If True, removes the original file instead of archiving.

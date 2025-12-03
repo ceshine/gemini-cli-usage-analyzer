@@ -82,7 +82,7 @@ gemini-cli-usage-analyzer --help
 Run the tool by providing the path to your project directory or a specific log file:
 
 ```bash
-gemini-cli-usage-analyzer [OPTIONS] LOG_FILE_PATH
+gemini-cli-usage-analyzer stats [OPTIONS] LOG_FILE_PATH
 ```
 
 ### Arguments
@@ -185,6 +185,43 @@ Overall Token Usage by Model
 └───────────────────────┴──────────┴──────────────┴───────────────┴───────────────┴─────────────────┴───────────┴──────────────┘
 ```
 
+### Manually Simplify Logs
+
+The `simplify` command's main purpose is to increase the simplification level of an existing `.jsonl` log file, making it useful for reducing file size or preparing logs for sharing and archiving.
+
+```bash
+gemini-cli-usage-analyzer simplify [OPTIONS] INPUT_FILE_PATH
+```
+
+#### Arguments
+
+*   `INPUT_FILE_PATH`: The path to the input `.jsonl` file.
+    *   If a **directory** is provided, the tool searches for `telemetry.jsonl` within that directory or its `.gemini` subdirectory.
+
+#### Options
+
+*   `-l`, `--level INTEGER`: The simplification level (0-3). Default: 1.
+    *   `0`: No simplification.
+    *   `1`: Keep only API requests and responses.
+    *   `2`: Level 1 + trim non-essential fields.
+    *   `3`: Keep only API responses and essential token usage attributes.
+*   `-a`, `--archive-folder PATH`: Folder to archive the original file before simplification. Default: `/tmp`.
+*   `-d`, `--disable-archiving`: If set, the original file will be permanently deleted instead of archived. **Use with caution.**
+
+#### Examples
+
+**Simplify logs in the current directory to level 2:**
+
+```bash
+gemini-cli-usage-analyzer simplify . -l 2
+```
+
+**Simplify a specific file to level 3 (maximum reduction) and disable archiving:**
+
+```bash
+gemini-cli-usage-analyzer simplify .gemini/telemetry.jsonl -l 3 --disable-archiving
+```
+
 ## Managing Disk Space
 
 To prevent OpenTelemetry log files from consuming excessive disk space, especially if you enable a low `log-simplify-level`, it is recommended to periodically process and archive them.
@@ -221,7 +258,6 @@ To provide accurate cost estimates, the tool fetches the latest model pricing an
 
 ## Roadmap (To-dos)
 
-* Export the log simplification and pruning tool to allow users to manually clean up the JSONL log file.
 * Support processing multiple projects at the same time.
 * Support using [Send2Trash](https://github.com/arsenetar/send2trash) for a cross-platform native file trashing experience instead of moving to `/tmp`.
 

@@ -1,6 +1,6 @@
 [project]
 name = "gemini-cli-usage-analyzer"
-version = "0.1.1"
+version = "0.2.0"
 description = "A simple tool to analyze Gemini CLI token usage using its OpenTelemetry logs."
 requires-python = ">=3.13"
 dependencies = [
@@ -21,4 +21,4 @@ dev = [
 reportCallInDefaultInitializer = false
 
 [project.scripts]
-gemini-cli-usage-analyzer = "gemini_cli_usage_analyzer.calculate_token_usage:TYPER_APP"
+gemini-cli-usage-analyzer = "gemini_cli_usage_analyzer.__main__:main"
