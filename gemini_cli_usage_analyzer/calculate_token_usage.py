@@ -12,12 +12,16 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from . import __version__
 from .price_spec import get_price_spec
 from .convert_logs import main as convert_log_file
 
 LOGGER = logging.getLogger(__name__)
 TYPER_APP = typer.Typer()
 TABLE_ROW_STYLES = ["white", "yellow"]
+
+# Use a sensible default for this CLI tool
+os.environ.setdefault("PRICE_CACHE_PATH", str(Path("~/.gemini/prices.json").expanduser()))
 
 
 @dataclass
@@ -271,6 +275,8 @@ def main(
     """
     console = Console()
 
+    console.print(f"[bold]Gemini CLI Token Usage and Cost Analysis[/bold] version `{__version__}` \n")
+
     if log_file_path.is_dir():
         source_log_file, jsonl_file = None, None
         # Try to find the the default file in the specified folder
@@ -380,7 +386,6 @@ def main(
 
 
 if __name__ == "__main__":
-    os.environ["PRICE_CACHE_PATH"] = "~/.gemini/prices.json"
     logging.basicConfig(
         level=logging.INFO,
         format="[%(asctime)s][%(levelname)s][%(name)s] %(message)s",
