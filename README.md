@@ -1,8 +1,8 @@
-# Gemini-CLI-Usage-Analyzer
-
 <p align="center">
   <img src="assets/gemini_cli_usage_analyzer_500.png" alt="Project Banner Image">
 </p>
+
+# Gemini-CLI-Usage-Analyzer
 
 This project provides a simple command-line tool that helps you analyze token usage in your Gemini CLI sessions. It relies on the OpenTelemetry observability support provided by Gemini CLI and implements a pruning and simplification routine, enabled by default, to reduce the size of the OpenTelemetry log files and prevent them from consuming excessive disk space.
 
