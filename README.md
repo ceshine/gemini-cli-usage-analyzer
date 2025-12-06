@@ -12,6 +12,8 @@ Caveats: Although this project is highly inspired by [ccusage](https://github.co
 
 Disclosure: This project was developed with substantial assistance from the Gemini CLI, which is powered by the Gemini 3 Pro (Preview), the Gemini 2.5 Flash, and the Gemini 2.5 Flash Lite models.
 
+[The blog post for the initial release (version 0.2.0)](https://blog.ceshine.net/post/gemini-cli-usage-analyzer-initial-release/)
+
 ## Prerequisite: Enable OpenTelemetry Support in Gemini CLI
 
 To use this tool, you must enable [local file-based OpenTelemetry support](https://geminicli.com/docs/cli/telemetry/#file-based-output-recommended) in the Gemini CLI.
@@ -28,6 +30,8 @@ Add the following `telemetry` configuration to your global settings file (usuall
   }
 }
 ```
+
+**Important Note**: You may need to create the `.gemini` folder in your project directory if it doesn't already exist.
 
 **Note:** Changes to the `telemetry` configuration in `settings.json` often require restarting your Gemini CLI session for them to take effect.
 
@@ -110,25 +114,25 @@ gemini-cli-usage-analyzer stats [OPTIONS] LOG_FILE_PATH
 **Analyze the current directory (uses default timezone):**
 
 ```bash
-gemini-cli-usage-analyzer .
+gemini-cli-usage-analyzer stats .
 ```
 
 **Recommended: Use the highest level of simplification and pruning if you just want token usage statistics:**
 
 ```bash
-gemini-cli-usage-analyzer . --log-simplify-level 3
+gemini-cli-usage-analyzer stats . --log-simplify-level 3
 ```
 
 **Analyze with a specific timezone:**
 
 ```bash
-gemini-cli-usage-analyzer . -tz "Asia/Taipei"
+gemini-cli-usage-analyzer stats . -tz "Asia/Taipei"
 ```
 
 **Analyze a specific converted log file:**
 
 ```bash
-gemini-cli-usage-analyzer .gemini/telemetry.jsonl
+gemini-cli-usage-analyzer stats .gemini/telemetry.jsonl
 ```
 
 **Example output**:
@@ -268,3 +272,4 @@ To provide accurate cost estimates, the tool fetches the latest model pricing an
 ## Acknowledgements
 
 - The [AGENTS.md](./AGENTS.md) was adapted from the examples in this blog post: [Getting Good Results from Claude Code](https://www.dzombak.com/blog/2025/08/getting-good-results-from-claude-code/).
+- This project uses the ["Model Prices and Context Window" JSON file](https://raw.githubusercontent.com/BerriAI/litellm/refs/heads/main/model_prices_and_context_window.json) from LiteLLM to calculate token costs. LiteLLM's efforts in maintaining this file are greatly appreciated.
