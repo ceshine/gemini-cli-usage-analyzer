@@ -241,7 +241,7 @@ The `--enable-archiving` option moves processed log files to `/tmp` to save spac
 **Example:**
 
 ```bash
-gemini-cli-usage-analyzer . --enable-archiving
+gemini-cli-usage-analyzer stats . --enable-archiving
 ```
 
 ## Internal Workflows
